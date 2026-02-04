@@ -135,7 +135,7 @@ import os
 class Robot():
     """Robot simulator with dynamic, per-message-type publishing intervals."""
     def __init__(self, fleetname, robot_serial_number, versions, version, manufacturer, connection_state,
-                 initial_position, bat_charge=50.0, lin_velocity=0.1, ang_velocity=0.04):
+                 initial_position, bat_charge=50.0, lin_velocity=0.1, ang_velocity=0.04, active_map="map1"):
 
         self.fleetname = fleetname
         self.robot_serial_number = robot_serial_number
@@ -148,6 +148,7 @@ class Robot():
         self.lin_velocity = lin_velocity
         self.ang_velocity = ang_velocity
         self.battery_charge = bat_charge # Battery percentage starts at x%
+        self.active_map = "" # Initially no map; will be updated via downloadMap action
 
         self.order = None # Represents the current task; None if no task is active
         self.instant_action = None
@@ -167,17 +168,21 @@ class Robot():
         self.depletion_rate_active = 0.1  # Battery percentage points per second when active
         self.depletion_rate_idle = 0.01   # Battery percentage points per second when idle
 
-        # MQTT Client setup : placeholder ('localhost', 1883)
+        # MQTT Client setup
         self.mqtt_client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1) # Define the MQTT client
         self.mqtt_client.on_connect = self.on_mqtt_connect
         self.mqtt_client.on_message = self.on_mqtt_message
-        self.mqtt_client.connect("localhost", 1883, 60) # connect mqtt
+
+        # Use environment variables for MQTT broker and port
+        broker = os.getenv("MQTT_BROKER", "localhost")
+        port = int(os.getenv("MQTT_PORT", 1883))
+        self.mqtt_client.connect(broker, port, 60) # connect mqtt
 
         # Subscribe to topics
         # Subscribe to MQTT order topic
         self.mqtt_client.subscribe(f"{self.fleetname}/{self.versions}/{self.manufacturer}/{self.robot_serial_number}/order")
-        # Subscribe to MQTT instantAction topic
-        self.mqtt_client.subscribe(f"{self.fleetname}/{self.versions}/{self.manufacturer}/{self.robot_serial_number}/instantAction")
+        # Subscribe to MQTT instantActions topic (note the plural)
+        self.mqtt_client.subscribe(f"{self.fleetname}/{self.versions}/{self.manufacturer}/{self.robot_serial_number}/instantActions")
 
         # Start MQTT loop in its own thread
         self.mqtt_thread = threading.Thread(target=self.mqtt_client.loop_forever)
@@ -213,10 +218,12 @@ class Robot():
                     # Initialize target_node from the first node, if available
                     if self.order.get("nodes"):
                         self.target_node = self.order["nodes"][0] # first target node
+                        # Update active map from the order if available
+                        if self.target_node.get("nodePosition") and self.target_node["nodePosition"].get("mapId"):
+                            self.active_map = self.target_node["nodePosition"]["mapId"]
                     print(f"Order received for {self.robot_serial_number}: {message}")
 
-            elif "instantAction" in msg.topic:
-
+            elif "instantActions" in msg.topic:
                 action_data =  json.loads(msg.payload)
                 print(f"Instant Action Received: {action_data}")
 
@@ -258,6 +265,14 @@ class Robot():
             else:
                 print(f"Executing non-blocking action {action_type}.")
                 # Perform the non-blocking action
+                if action_type == "downloadMap":
+                    # downloadMap: update active_map from parameters
+                    # parameters is a list of [{k: v}, {k: v}, ...]
+                    for param in parameters:
+                        if "mapId" in param:
+                            self.active_map = param["mapId"]
+                            print(f"Robot {self.robot_serial_number} updated active_map to {self.active_map}")
+
                 self.action_states.append({
                     "actionId": action_id,
                     "actionType": action_type,
@@ -444,12 +459,12 @@ class Robot():
             "timestamp": datetime.now().isoformat(), # "2024-09-17T14:30:00Z",
             "maps": [
                 {
-                    "mapId": "map1",
+                    "mapId": self.active_map,
                     "mapVersion": "1.0",
-                    "mapDescription": "Main warehouse map",
+                    "mapDescription": "Dynamic Map",
                     "mapStatus": "ENABLED"
                 }
-            ],
+            ] if self.active_map else [],
             "orderId": self.order["orderId"] if self.order else "", # "orderId": "order_1234",
             "orderUpdateId": self.order["orderUpdateId"] if self.order else 1,
             "zoneSetId": self.fleetname,
@@ -468,7 +483,7 @@ class Robot():
                 "x": self.position[0],
                 "y": self.position[1],
                 "theta": self.position[2],
-                "mapId": "map1",
+                "mapId": self.active_map if self.active_map else "none",
                 "positionInitialized": True
             },
             "velocity": {

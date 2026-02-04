@@ -1,12 +1,3 @@
-Based on the code analysis of the files provided in the repository structure, here is the comprehensive **README.md** and **requirements.txt**.
-
------
-
-### 1\. Detailed Documentation
-
-Create a file named `README.md`. This documentation reflects the actual architecture found in the `fleet_management` scripts, including the fuzzy logic dispatcher, traffic negotiation, and VDA5050-style messaging.
-
-````markdown
 # OpenFMS (Open Source Fleet Management System)
 
 OpenFMS is a Python-based Fleet Management System designed to control, schedule, and route Autonomous Guided Vehicles (AGVs) or mobile robots. It utilizes a VDA5050-compliant messaging structure over MQTT, integrates with a PostgreSQL database for state persistence, and features a fuzzy-logic-based task dispatcher and a sophisticated traffic conflict resolution system.
@@ -18,45 +9,98 @@ The codebase is organized into the following core modules:
 ```text
 OpenFMS/
 ├── config.yaml                     # Central configuration (Graph, MQTT, DB settings)
+├── docker-compose.yml              # Cluster orchestration
 ├── fleet_management/
 │   ├── FmMain.py                   # Entry point: Initializes handlers & terminal GUI
 │   ├── FmTaskHandler.py            # Task generation, path planning, & fuzzy allocation
 │   ├── FmTrafficHandler.py         # Collision avoidance & deadlock resolution
 │   ├── FmScheduleHandler.py        # Lifecycle management, analytics, & auto-charging
 │   ├── FmRobotSimulator.py         # VDA5050 Robot Simulator for testing
-│   ├── FmInterface.py              # Script to run automated simulation scenarios
-│   └── submodules/                 # DB & MQTT wrappers (Order, State, Factsheet, etc.)
+│   └── FmInterface.py              # Script to run automated simulation scenarios
+├── submodules/                     # DB & MQTT wrappers (Order, State, Factsheet, etc.)
 └── requirements.txt                # Python dependencies
-````
+```
 
 ## 🚀 Key Features
 
-  * **Fuzzy Logic Task Dispatching**: Uses `scikit-fuzzy` to assign tasks based on variables like battery level, idle time, travel distance, and payload efficiency.
-  * **Traffic Management**: Handles multi-robot traffic conflicts including:
-      * **Cross Conflicts**: Priority-based yielding at intersections.
-      * **Last-Mile Conflicts**: Checks availability of destination docks before release.
-      * **Deadlock Prevention**: Uses wait-points (`Wx` nodes) to allow robots to yield.
-  * **VDA5050 Compliance**: Communication via MQTT using standard topics (`order`, `state`, `factsheet`, `instantAction`).
-  * **PostgreSQL Integration**: Persists robot states, active orders, and map data.
-  * **Analytics & Notifications**: Tracks fleet throughput, latency, and idle time; sends SMS alerts via Twilio for critical errors.
-  * **Built-in Simulator**: Includes `FmRobotSimulator.py` to simulate robot kinematics and VDA5050 messaging without physical hardware.
+*   **Fuzzy Logic Task Dispatching**: Uses `scikit-fuzzy` to assign tasks based on variables like battery level, idle time, travel distance, and payload efficiency.
+*   **Traffic Management**: Handles multi-robot traffic conflicts including:
+    *   **Cross Conflicts**: Priority-based yielding at intersections.
+    *   **Last-Mile Conflicts**: Checks availability of destination docks before release.
+    *   **Deadlock Prevention**: Uses wait-points (`Wx` nodes) to allow robots to yield.
+*   **VDA5050 Compliance**: Communication via MQTT using standard topics (`order`, `state`, `factsheet`, `instantActions`).
+*   **PostgreSQL Integration**: Persists robot states, active orders, and map data.
+*   **Analytics & Notifications**: Tracks fleet throughput, latency, and idle time; sends SMS alerts via Twilio for critical errors.
+*   **Built-in Simulator**: Includes `FmRobotSimulator.py` to simulate robot kinematics and VDA5050 messaging without physical hardware.
 
-## 🛠️ Installation
+## ⚙️ Configuring Your Fleet (`config.yaml`)
 
-### Prerequisites
+The `config.yaml` is the heart of the system. Here is how to replicate your environment:
 
-1.  **Python 3.8+**
-2.  **PostgreSQL**: Ensure a database (default: `postgres`) is running.
-3.  **MQTT Broker**: Mosquitto or similar (default: `localhost:1883`).
+### 1. Infrastructure Settings
+*   **`mqtt`**: Connection details for your broker.
+*   **`fleet_info`**: Metadata identifying your fleet (e.g., `kullar`).
+*   **`postgres`**: Database credentials for state persistence.
+*   **`twilio_server`**: (Optional) SMS alerting settings.
 
-### Setup
+### 2. The Logic Layers
+*   **`graph`**: Defines connectivity. Every node (key) lists its neighbors and the distance (cost) between them.
+    *   *Convention*: `Nx: [[Ny, cost], ...]`
+*   **`itinerary`**: Defines the physical properties of nodes.
+    *   **`coordinate`**: `[x, y, theta, w]` (Quaternion orientation).
+    *   **`description`**: Defines node behavior.
+        *   `checkpoint`: Standard path node.
+        *   `waitpoint`: Safe yielding spot for traffic resolution.
+        *   `home_dock`: Where robots park when idle.
+        *   `charge_dock`: Automated charging station.
+        *   `station_dock`: Fixed loading/unloading point.
+        *   `elevator`: Triggers map switching logic.
+*   **`maps`**: Links fleet names to specific map files (`.pgm`, `.yaml`).
 
-1.  Clone the repository.
-2.  Install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  **Database Setup**: The system assumes a PostgreSQL database exists. Ensure the credentials in `config.yaml` match your local setup. The tables are auto-generated/managed by the submodule handlers (based on `FmTaskHandler.py` logic).
+### 3. Naming Conventions (TL;DR)
+To ensure the brain (`FmTaskHandler`) and police (`FmTrafficHandler`) work correctly:
+-   **`Cx`**: **Checkpoints**. General nodes used for navigation.
+-   **`Wx`**: **Waitpoints**. Must be associated with a nearby `Cx` node to allow priority-based yielding.
+-   **`Ex`**: **Elevators**. Required for multi-floor navigation and dynamic map loading.
+
+## 🗺️ Dynamic Map Handling (TL;DR)
+
+*   **Robots start naked**: They have no maps and no idea where they are initially (Tabula Rasa).
+*   **Just-in-Time Maps**: The manager issues a `downloadMap` action (with a download link) whenever a task requires a specific map.
+*   **Navigation**: The simulator downloads and uses the map from the link to navigate. No map = no navigation.
+*   **Elevator Switching**: Moving between floors via elevators automatically triggers map changes.
+*   **Config Alert**: Users **must** populate the `maps` field in `config.yaml` with valid files/links for their specific environment.
+
+## 🗄️ PostgreSQL Setup (TL;DR)
+
+OpenFMS uses PostgreSQL for state persistence, order tracking, and map storage. All configuration is centralized in `config.yaml`.
+
+### 1. Configure Connection
+Edit the `postgres` block in `config.yaml` to point to your database:
+```yaml
+postgres:
+  host: "localhost"       # Use "db" if running via Docker
+  port: "5432"
+  database: "postgres"    # The database name
+  user: "postgres"
+  password: "your_password"
+```
+
+### 2. Table Auto-Creation
+**No manual SQL required.** The system automatically initializes the following tables on startup:
+- `state`: Stores real-time AGV status (battery, position, etc.).
+- `orders`: Tracks active and historical VDA5050 orders.
+- `maps`: Stores binary map data (.pgm) and metadata (.yaml).
+
+### 3. Docker vs Local
+- **Docker**: The `docker compose` stack handles everything. The manager and scenario runners connect to the sibling `db` container automatically.
+- **Local**: Ensure a Postgres instance is running and accessible from your terminal.
+
+### 4. Verification
+Check if data is being recorded by running:
+```bash
+docker exec -it openfms-db-1 psql -U postgres -d postgres -c "SELECT * FROM state LIMIT 5;"
+```
 
 ## 🐳 Docker (Zero to Hero)
 
@@ -68,11 +112,6 @@ From the root of the repository, execute:
 docker compose build
 docker compose up -d
 ```
-This command starts:
-- **`db`**: PostgreSQL 13 instance.
-- **`mqtt`**: Mosquitto MQTT broker.
-- **`simulator`**: An AGV simulator running in the background.
-- **`scenario`**: An automated task dispatcher that runs a predefined simulation.
 
 ### 2. Verify Execution
 To see the automated scenario in action (tasks being dispatched and processed):
@@ -80,22 +119,9 @@ To see the automated scenario in action (tasks being dispatched and processed):
 docker compose logs -f scenario
 ```
 
-### 3. Stopping the Simulation
-To stop all running services and remove the containers:
-```bash
-docker compose down
-```
-This will shut down the Database, MQTT broker, Simulator, and Scenario runner.
+### 3. Manual vs Automated Mode (Dynamic Tasks)
+By default, the system runs an automated script (`FmInterface.py`). To switch to **Interactive Manual Mode**:
 
-### 4. Customizing the Simulation
-
-#### Adjusting Robots and Tasks
-To change the number of robots or the tasks they perform in the automated scenario:
-1.  **Uncomment Robots**: Open `fleet_management/FmRobotSimulator.py` and uncomment the desired robot configurations in the `robot_configurations` list.
-2.  **Uncomment Tasks**: Open `fleet_management/FmInterface.py` and ensure the `tasks` list has a corresponding set of tasks for your robots.
-
-#### Manual/Interactive Mode
-If you want to manually issue tasks via the interactive terminal instead of using the automated `scenario`:
 1.  Open `docker-compose.yml`.
 2.  **Comment out** the `scenario` service.
 3.  **Uncomment** the `manager` service.
@@ -103,129 +129,24 @@ If you want to manually issue tasks via the interactive terminal instead of usin
     ```bash
     docker compose up -d --remove-orphans
     ```
-5.  Attach to the interactive manager:
+5.  **Attach to the Manager**: Since the manager needs player input for its terminal GUI, you must attach to it:
     ```bash
     docker attach openfms-manager-1
     ```
+    *Note: Use `Ctrl+P, Ctrl+Q` to detach without killing the process.*
 
-## ⚙️ Configuration (`config.yaml`)
-
-The `config.yaml` file defines the fleet environment. Key sections:
-
-  * **`mqtt`**: Broker address and port.
-  * **`postgres`**: Database credentials.
-  * **`graph`**: Defines the node connectivity and edge weights (distances).
-  * **`itinerary`**: Defines node properties (coordinates, types like `station_dock`, `charge_dock`, `waitpoint`).
-  * **`maps`**: links `.pgm` and `.yaml` map files to fleet IDs.
-
-## 🏃 Usage
-
-### 1\. Running the Fleet Manager
-
-This starts the central control server. It opens an interactive terminal GUI for monitoring fleets and manually issuing tasks.
-
+### 4. Stopping the Simulation
+To stop all running services and remove the containers:
 ```bash
-python3 fleet_management/FmMain.py
+docker compose down
 ```
-
-  * **Interactive Menu**: Allows you to send `transport`, `move`, or `charge` tasks, pause robots, or manage landmarks.
-
-### 2\. Running the Robot Simulator
-
-Simulates one or more robots (AGVs) that connect to the manager via MQTT.
-
-```bash
-python3 fleet_management/FmRobotSimulator.py
-```
-
-  * *Note*: You can configure multiple robots inside the `main()` function of this script.
-
-### 2\. Running an Automated Scenario
-
-To run a predefined scenario (dispatching specific tasks at specific times):
-
-```bash
-python3 fleet_management/FmInterface.py
-```
-
-## 🧠 System Modules Explained
-
-### `FmMain.py`
-
-The orchestrator. It establishes DB/MQTT connections and spins up the `FmScheduleHandler`. It handles the main loop that triggers periodic traffic checks.
-
-### `FmTaskHandler.py`
-
-The "Brain".
-
-  * **Path Planning**: Implements shortest-path algorithms to generate routes.
-  * **Fuzzy Dispatcher**: A class `FuzzyTaskDispatcher` that calculates a "fitness" score (0.0 - 1.0) for every robot candidate for a task.
-  * **Order Generation**: Converts routes into VDA5050 `Order` messages containing nodes and edges.
-
-### `FmTrafficHandler.py`
-
-The "Police".
-
-  * It monitors the `state` of all robots.
-  * **`manage_traffic()`**: Checks if a robot's next node is occupied.
-  * If a conflict is detected, it negotiates based on task priority. Lower priority robots are sent to associated **Waitpoints** (`W` nodes) or instructed to wait.
-
-### `FmScheduleHandler.py`
-
-The "Manager".
-
-  * Monitors battery levels and triggers auto-charging if below threshold.
-  * Manages the "Unassigned Task Queue". If no robot is fit for a task, it queues it and retries later.
-  * Generates analytics reports (saved to `logs/`).
-
-## 📊 Analytics
-
-The system automatically logs performance metrics to the `logs/` directory, including:
-
-  * Throughput (Orders/hour)
-  * Average Latency per robot
-  * Fleet Idle time metrics
 
 -----
 
-*Documentation generated based on source code analysis.*
-
-```
-```
-
-
-
-
-
-[OUTDATED INFO]
-
-## USAGE:
-
-### Terminal 1:
-launch the viro simple fleet client with the below command after you have filled in the necessary information of the `postgresql` db address and other client-specific information in its launch parameter:
-
-```bash
-'hostname': "xxx.xxx.xx.xxx"
-'database': "postgres"
-'username': "postgres"
-'pwd': "xxx"
-'port': 123
-'robot_id': X
-# etc...
-```
-
-```bash
-$ python3 fleet_management/FmMain.py
-```
-
-### Terminal 2:
-similarly, fill the master/server/manager messaging `twilio` information as well as the same `postgresql` db address, before you run the user command line interface with the below command and follow the prompt. A sample graph; with respective nodes and their connecting edges is auto generated when you use the `fm_add_landmark_request` option to build a graph. the notation `A1`, `A2`, `A3`... are used in identifying 'charge_dock', 'station_dock', 'home_dock', 'waypoint' landmarks and `E1`, `E2` is the expected convention to identify 'elevator_dock'.
-
-```bash
-$ python3 fleet_management/FmRobotSimulator.py
-```
 
 ![CLI1](https://github.com/hazeezadebayo/viro_simple_fleet/blob/main/media/b.png)
 ![CLI2](https://github.com/hazeezadebayo/viro_simple_fleet/blob/main/media/c.png)
 
 ![running](https://github.com/hazeezadebayo/viro_simple_fleet/blob/main/media/a.png)
+
+*Social: [OpenFMS on GitHub](https://github.com/hazeezadebayo/viro_simple_fleet)*
