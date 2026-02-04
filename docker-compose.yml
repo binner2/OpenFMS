@@ -1,0 +1,59 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped
+
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  # manager:
+  #   build: .
+  #   depends_on:
+  #     - mqtt
+  #     - db
+  #   environment:
+  #     MQTT_BROKER: mqtt
+  #     MQTT_PORT: 1883
+  #     PYTHONUNBUFFERED: 1
+  #   volumes:
+  #     - ./logs:/app/logs
+  #   stdin_open: true # docker run -i
+  #   tty: true # docker run -t
+  #   command: python3 fleet_management/FmMain.py
+
+  simulator:
+    build: .
+    depends_on:
+      - mqtt
+      # - manager
+    environment:
+      MQTT_BROKER: mqtt
+      MQTT_PORT: 1883
+      PYTHONUNBUFFERED: 1
+    command: python3 fleet_management/FmRobotSimulator.py
+
+  # Optional: Interface wrapper to run automated scenarios
+  scenario:
+    build: .
+    depends_on:
+      - mqtt
+      - db
+      # - manager
+    environment:
+      MQTT_BROKER: mqtt
+      MQTT_PORT: 1883
+      PYTHONUNBUFFERED: 1
+    # Wait for manager to be ready (rudimentary sleep in script or here)
+    entrypoint: [ "/bin/bash", "-c", "sleep 10 && python3 fleet_management/FmInterface.py" ]

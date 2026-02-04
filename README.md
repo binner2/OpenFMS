@@ -58,6 +58,56 @@ OpenFMS/
     ```
 3.  **Database Setup**: The system assumes a PostgreSQL database exists. Ensure the credentials in `config.yaml` match your local setup. The tables are auto-generated/managed by the submodule handlers (based on `FmTaskHandler.py` logic).
 
+## 🐳 Docker (Zero to Hero)
+
+The easiest way to run OpenFMS along with all its dependencies (PostgreSQL, Mosquitto MQTT) is using Docker Compose.
+
+### 1. Build and Run
+From the root of the repository, execute:
+```bash
+docker compose build
+docker compose up -d
+```
+This command starts:
+- **`db`**: PostgreSQL 13 instance.
+- **`mqtt`**: Mosquitto MQTT broker.
+- **`simulator`**: An AGV simulator running in the background.
+- **`scenario`**: An automated task dispatcher that runs a predefined simulation.
+
+### 2. Verify Execution
+To see the automated scenario in action (tasks being dispatched and processed):
+```bash
+docker compose logs -f scenario
+```
+
+### 3. Stopping the Simulation
+To stop all running services and remove the containers:
+```bash
+docker compose down
+```
+This will shut down the Database, MQTT broker, Simulator, and Scenario runner.
+
+### 4. Customizing the Simulation
+
+#### Adjusting Robots and Tasks
+To change the number of robots or the tasks they perform in the automated scenario:
+1.  **Uncomment Robots**: Open `fleet_management/FmRobotSimulator.py` and uncomment the desired robot configurations in the `robot_configurations` list.
+2.  **Uncomment Tasks**: Open `fleet_management/FmInterface.py` and ensure the `tasks` list has a corresponding set of tasks for your robots.
+
+#### Manual/Interactive Mode
+If you want to manually issue tasks via the interactive terminal instead of using the automated `scenario`:
+1.  Open `docker-compose.yml`.
+2.  **Comment out** the `scenario` service.
+3.  **Uncomment** the `manager` service.
+4.  Restart the stack:
+    ```bash
+    docker compose up -d --remove-orphans
+    ```
+5.  Attach to the interactive manager:
+    ```bash
+    docker attach openfms-manager-1
+    ```
+
 ## ⚙️ Configuration (`config.yaml`)
 
 The `config.yaml` file defines the fleet environment. Key sections:
