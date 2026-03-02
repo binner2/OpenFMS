@@ -159,7 +159,14 @@ docker compose down
 
 
 
-
+TODO
+- fix dashboard data analytics
+- parallel decision (1000+ robots)
+- star or mesh connection eval
+- import latex and review upgrades
+- [openrmf] graph generator and spawn robot count config
+- [paper] fix paper and resubmit
+- [patent] new patent idea from test and improvements
 
 
 

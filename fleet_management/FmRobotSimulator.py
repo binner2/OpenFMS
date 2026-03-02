@@ -1089,7 +1089,7 @@ if __name__ == "__main__":
 
 # USAGE:
 # Terminal 1: simulation
-# export DOCKERKEY_PERM=tskey-auth-k6pMCP2tNB11CNTRL-PYNihUnnZZeHfD6Jza8xZePyA8QXJbayg
+# export DOCKERKEY_PERM=tskey
 # cd docker_ws/env/dev3
 # export DISPLAY=:0.0
 # xhost +local:docker

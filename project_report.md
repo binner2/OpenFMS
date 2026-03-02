@@ -419,3 +419,15 @@ The objective is to resolve a critical bug where the system "waits forever as it
 ### Manual Verification
 - Run the simulation environment.
 - Observe high-priority or waitpoint scenarios where docking sequences (pick/drop) occur. The Fleet Manager should now immediately register the `dock` completion, trigger the instant action, and receive the synchronous `FINISHED` state, advancing the sequence reliably without stalling forever.
+
+
+
+TODO
+- fix dashboard data analytics
+- parallel decision (1000+ robots)
+- star or mesh connection eval
+- import latex and review upgrades
+- [openrmf] graph generator and spawn robot count config
+- [paper] fix paper and resubmit
+- [patent] new patent idea from test and improvements
+- 
