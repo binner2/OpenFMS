@@ -15,8 +15,9 @@ import sys, os, datetime, types, unittest.mock, time
 # Stub imports BEFORE importing real modules
 for _n in ['psycopg2','psycopg2.extras','twilio','twilio.rest']:
     if _n not in sys.modules: sys.modules[_n] = unittest.mock.MagicMock()
-for _n in ['numpy','numpy.core','scipy','scipy.signal','skfuzzy','skfuzzy.control','skfuzzy.membership','skfuzzy.defuzz']:
-    if _n not in sys.modules: sys.modules[_n] = types.ModuleType(_n)
+# We comment out these stubs because pip install scikit-fuzzy numpy scipy installed the real ones
+# for _n in ['numpy','numpy.core','scipy','scipy.signal','skfuzzy','skfuzzy.control','skfuzzy.membership','skfuzzy.defuzz']:
+#     if _n not in sys.modules: sys.modules[_n] = types.ModuleType(_n)
 for _n in ['connection','factsheet','state','visualization','instant_actions','order']:
     if _n not in sys.modules: sys.modules[_n] = unittest.mock.MagicMock()
 
@@ -515,7 +516,21 @@ def test_s7():
 
     print(f"\n{CYAN}[Execute] Testing manage_robot on low-battery idle robot...{RESET}")
     # Call the top-level orchestration method that natively checks schedules and batteries
-    env.th.task_handler.manage_robot(FLEET)
+
+    # We will explicitly setup schedule_handler
+    schedule_handler = FmScheduleHandler(fleetname=FLEET, version=VER, versions=VERS, manufacturer=MFR, dbconn=None)
+    schedule_handler.traffic_handler = env.th
+    schedule_handler.traffic_handler.task_handler = env.th.task_handler
+    schedule_handler.traffic_handler.online_robots = set(['A'])
+
+    # Needs to be effectively idle (no order_id, driving=False)
+    single_state = (
+        None, None, '', 'C2', None, False, [],
+        {'x': 0.0, 'y': 0.0, 'theta': 0.0}, None, {'batteryCharge': 15.0}, None, None
+    )
+    schedule_handler.traffic_handler.task_handler.state_handler.fetch_data.return_value = single_state
+
+    schedule_handler.manage_robot(FLEET, 'A')
     
     # Verify that the low battery triggered the charge task creation sequence
     charge_call_count = env.th.task_handler.create_charge_task.call_count
