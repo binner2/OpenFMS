@@ -745,6 +745,14 @@ class FmScheduleHandler():
         num_robots, overall_avg = self.traffic_handler.task_handler.state_handler.compute_system_avg_latency(show_plot=True)
         log_and_store(f"num robots: {num_robots}, overall avg [sec]: {overall_avg:.2f}.")
 
+        robot_aoi = self.traffic_handler.task_handler.state_handler.compute_robot_information_age(show_plot=True)
+        log_and_store(f"avg per robot information age [sec]: {robot_aoi}.")
+
+        num_robots, avg_aoi, max_aoi = self.traffic_handler.task_handler.state_handler.compute_system_information_age(show_plot=True)
+        log_and_store(
+            f"num robots: {num_robots}, system information age avg [sec]: {avg_aoi:.2f}, max [sec]: {max_aoi:.2f}."
+        )
+
         num_robots, overall_avg, per_robot_avrge = self.compute_overall_idle_metrics(show_plot=True)
         log_and_store(f"avg per robot Idle Time [sec]: {per_robot_avrge}.", level='critical')
 

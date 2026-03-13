@@ -44,6 +44,9 @@ class StateSubscriber:
         # Format: { robot_id: [latency1, latency2, ...] }
         self.latency_record_len_min = 5 # Initialize the latency analytics with a fixed recording window length (in minutes).
         self.latency_data = {}  # { robot_id: { "start_time": float, "buckets": [ {"sum": float, "count": int}, ... ] } }
+        # Tracks the wall-clock receive timestamp for the most recent state per robot.
+        # Used to measure information age (state freshness) at analytics time.
+        self.last_receive_time = {}  # { robot_id: receive_time_epoch }
 
         # In-memory cache — keyed by serialNumber, holds the raw MQTT state payload.
         # Overwritten on every new state message from each robot.
@@ -269,6 +272,7 @@ class StateSubscriber:
 
         msg_latency = receive_time - msg_timestamp
         robot_id = msg.get("serialNumber", "unknown")
+        self.last_receive_time[robot_id] = receive_time
 
         # Initialize record for the robot if not already present.
         if robot_id not in self.latency_data:
@@ -357,6 +361,50 @@ class StateSubscriber:
                 title="Overall Average Latency vs. Robot Count")
 
         return num_robots, overall_avg
+
+    def compute_robot_information_age(self, now_ts=None, show_plot=True):
+        """Compute information age (AoI proxy) per robot.
+
+        AoI(t) = t_now - t_last_receive(robot).
+        This is intentionally distinct from network transport latency.
+        """
+        if now_ts is None:
+            now_ts = time.time()
+
+        aoi = {}
+        for robot_id, rx_time in self.last_receive_time.items():
+            aoi[robot_id] = max(0.0, now_ts - rx_time)
+
+        if show_plot and aoi:
+            self.terminal_bar_chart(
+                data=aoi,
+                xlabel="Robot ID",
+                title="Information Age per Robot (sec)"
+            )
+        return aoi
+
+    def compute_system_information_age(self, show_plot=True):
+        """Compute aggregate information age over robots.
+
+        Returns (num_robots, avg_aoi, max_aoi).
+        """
+        aoi = self.compute_robot_information_age(show_plot=False)
+        num_robots = len(aoi)
+        if num_robots == 0:
+            avg_aoi = 0.0
+            max_aoi = 0.0
+        else:
+            vals = list(aoi.values())
+            avg_aoi = sum(vals) / num_robots
+            max_aoi = max(vals)
+
+        if show_plot and num_robots > 0:
+            self.terminal_bar_chart(
+                data={num_robots: avg_aoi},
+                xlabel="Number of Robots",
+                title="System Average Information Age (sec)"
+            )
+        return num_robots, avg_aoi, max_aoi
 
 
     def terminal_bar_chart(self, data, xlabel="Category", title="Bar Chart"):

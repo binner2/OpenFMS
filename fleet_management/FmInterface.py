@@ -73,7 +73,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="OpenFMS Live Test Interface")
     parser.add_argument("cmd", choices=["generate", "run"], help="Command to execute")
     parser.add_argument("mode", help="Test scenario to run (e.g. S1, S2, S3) or 'random'.")
+    parser.add_argument("--num-robots", type=int, default=2,
+                        help="Robot count for random-mode generation and dispatch plans.")
+    parser.add_argument("--duration", type=int, default=180,
+                        help="Run duration in seconds for 'run' command.")
+    parser.add_argument("--analytics-interval", type=int, default=30,
+                        help="Seconds between analytics snapshots.")
+    parser.add_argument("--task-spacing", type=int, default=5,
+                        help="Seconds between task dispatches in random mode.")
+    parser.add_argument("--fleet-id", default="kullar",
+                        help="Fleet id to use while dispatching tasks.")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Optional random seed for reproducible random-mode runs.")
     args = parser.parse_args()
+
+    if args.seed is not None:
+        random.seed(args.seed)
 
     mode = args.mode.upper()
     cmd = args.cmd
@@ -101,7 +116,7 @@ if __name__ == "__main__":
             while g is None:
                 try:
                     g = GridFleetGraph(
-                        num_robots=3,
+                        num_robots=max(1, args.num_robots),
                         num_station_docks=6,
                         num_charge_docks=2,
                         num_waitpoints=4,
@@ -142,12 +157,14 @@ if __name__ == "__main__":
         station_docks = [n['loc_id'] for n in fm.task_dictionary.get('itinerary', []) if n.get('description') == "station_dock"]
         if not station_docks: station_docks = ["C1", "C2"]
         tasks = []
-        for i, robot in enumerate(["R01", "R02"]):
+        for i in range(max(1, args.num_robots)):
+            robot = f"R{i + 1:02d}"
             tasks.append({
-                "delay": i * 5,
+                "delay": i * max(1, args.task_spacing),
                 "robot_id": robot,
                 "from": random.choice(station_docks),
                 "to": random.choice(station_docks),
+                "type": "transport",
                 "priority": "medium",
                 "payload": 5,
                 "sent": False
@@ -158,7 +175,7 @@ if __name__ == "__main__":
     # fm_dispatch_task call that silently used a stale 'A12' default.)
     fm.schedule_handler.fm_send_factsheet_request(fm.manufacturer, fm.version)
 
-    analytics_interval = 30  # seconds between dashboard snapshot updates
+    analytics_interval = max(1, args.analytics_interval)  # seconds between dashboard snapshot updates
     last_analytics_time = -analytics_interval  # fire immediately on first cycle
 
     try:
@@ -184,14 +201,26 @@ if __name__ == "__main__":
             # Periodically write analytics snapshot so the dashboard stays current.
             if elapsed_time - last_analytics_time >= analytics_interval:
                 fm.schedule_handler.fm_analytics(
-                    f_id="kullar", m_id=fm.manufacturer,
+                    f_id=args.fleet_id, m_id=fm.manufacturer,
                     r_id=None, debug_level="info", write_to_file=True
                 )
                 last_analytics_time = elapsed_time
+
+            if elapsed_time >= max(1, args.duration):
+                print(f"\nReached duration limit ({args.duration}s). Finalizing run.")
+                fm.schedule_handler.fm_analytics(
+                    f_id=args.fleet_id,
+                    m_id=fm.manufacturer,
+                    r_id=None,
+                    debug_level="info",
+                    write_to_file=True
+                )
+                break
 
             time.sleep(1)
 
     except KeyboardInterrupt:
         print("\nSimulation stopped by user.")
+    finally:
         fm.cleanup()
         
