@@ -15,8 +15,9 @@ import sys, os, datetime, types, unittest.mock, time
 # Stub imports BEFORE importing real modules
 for _n in ['psycopg2','psycopg2.extras','twilio','twilio.rest']:
     if _n not in sys.modules: sys.modules[_n] = unittest.mock.MagicMock()
-for _n in ['numpy','numpy.core','scipy','scipy.signal','skfuzzy','skfuzzy.control','skfuzzy.membership','skfuzzy.defuzz']:
-    if _n not in sys.modules: sys.modules[_n] = types.ModuleType(_n)
+# We comment out these stubs because pip install scikit-fuzzy numpy scipy installed the real ones
+# for _n in ['numpy','numpy.core','scipy','scipy.signal','skfuzzy','skfuzzy.control','skfuzzy.membership','skfuzzy.defuzz']:
+#     if _n not in sys.modules: sys.modules[_n] = types.ModuleType(_n)
 for _n in ['connection','factsheet','state','visualization','instant_actions','order']:
     if _n not in sys.modules: sys.modules[_n] = unittest.mock.MagicMock()
 
@@ -515,14 +516,67 @@ def test_s7():
 
     print(f"\n{CYAN}[Execute] Testing manage_robot on low-battery idle robot...{RESET}")
     # Call the top-level orchestration method that natively checks schedules and batteries
-    env.th.task_handler.manage_robot(FLEET)
+
+    # We will explicitly setup schedule_handler
+    schedule_handler = FmScheduleHandler(fleetname=FLEET, version=VER, versions=VERS, manufacturer=MFR, dbconn=None)
+    schedule_handler.traffic_handler = env.th
+    schedule_handler.traffic_handler.task_handler = env.th.task_handler
+    schedule_handler.traffic_handler.online_robots = set(['A'])
+
+    # Needs to be effectively idle (no order_id, driving=False)
+    single_state = (
+        None, None, '', 'C2', None, False, [],
+        {'x': 0.0, 'y': 0.0, 'theta': 0.0}, None, {'batteryCharge': 15.0}, None, None
+    )
+    schedule_handler.traffic_handler.task_handler.state_handler.fetch_data.return_value = single_state
+
+    schedule_handler.manage_robot(FLEET, 'A')
     
     # Verify that the low battery triggered the charge task creation sequence
     charge_call_count = env.th.task_handler.create_charge_task.call_count
     print(f"      {CYAN}Charge Task Creation calls: {charge_call_count}{RESET} (Expected > 0)")
 
 
+def test_s8_waitpoint_exhaustion():
+    print_header("S8 (M1.2/S2.3): Waitpoint Exhaustion (|R| > |V_W|) Failure Mode Analysis")
+    # Simulate a scenario where 3 robots try to access a node that only has 1 waitpoint available.
+    print_state({
+        'A (Yielding)': 'base=C1, horizon=[C2, C3], priority=low',
+        'B (Incoming)': 'base=C4, horizon=[C2, C1], priority=high',
+        'C (Incoming)': 'base=C5, horizon=[C2, C1], priority=medium',
+    }, "C2 is a bottleneck. Only W2 is available. Robot A takes W2. Robot B takes C2. Robot C has nowhere to yield -> DEADLOCK/STANDBY expected.")
+
+    env = TestTrafficEnvironment(['A', 'B', 'C'])
+
+    # State Mocking
+    sA = mock_state_rec('A', base='C1')
+    sB = mock_state_rec('B', base='C4')
+    sC = mock_state_rec('C', base='C5')
+
+    # Orders Mocking - all converge on C2
+    oA = mock_order_rec('A', 'O_A', checkpoints=['C2', 'C3'], target_base_idx=0, landmark=[0.0, 'low', 'transport', 'C1', 'C3'])
+    oB = mock_order_rec('B', 'O_B', checkpoints=['C2', 'C1'], target_base_idx=0, landmark=[0.0, 'high', 'transport', 'C4', 'C1'])
+    oC = mock_order_rec('C', 'O_C', checkpoints=['C2', 'C1'], target_base_idx=0, landmark=[0.0, 'medium', 'transport', 'C5', 'C1'])
+
+    env.set_db([sA, sB, sC], [oA, oB, oC])
+
+    print(f"\n{CYAN}[Execute] Testing manage_traffic for Robot A (Low Priority)...{RESET}")
+    env.th.manage_traffic(FLEET, 'A', MFR, VER)
+
+    print(f"\n{CYAN}[Execute] Testing manage_traffic for Robot B (High Priority)...{RESET}")
+    env.th.manage_traffic(FLEET, 'B', MFR, VER)
+
+    print(f"\n{CYAN}[Execute] Testing manage_traffic for Robot C (Medium Priority - Arriving late)...{RESET}")
+    # Force C to attempt yielding, but W2 is already reserved by A.
+    env.th.manage_traffic(FLEET, 'C', MFR, VER)
+
+    # Traffic control is now kept in the DB via Context, not last_traffic_dict directly in instance
+    # The actual output state will show DEADLOCK or STANDBY based on the print logs.
+    print(f"      {CYAN}Check visual logs above for DEADLOCK or missing waitpoint reporting.{RESET}")
+
+
 if __name__ == '__main__':
+    test_s8_waitpoint_exhaustion()
     test_s1()
     test_s2a()
     test_s2b()
