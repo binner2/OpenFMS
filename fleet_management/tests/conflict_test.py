@@ -537,7 +537,46 @@ def test_s7():
     print(f"      {CYAN}Charge Task Creation calls: {charge_call_count}{RESET} (Expected > 0)")
 
 
+def test_s8_waitpoint_exhaustion():
+    print_header("S8 (M1.2/S2.3): Waitpoint Exhaustion (|R| > |V_W|) Failure Mode Analysis")
+    # Simulate a scenario where 3 robots try to access a node that only has 1 waitpoint available.
+    print_state({
+        'A (Yielding)': 'base=C1, horizon=[C2, C3], priority=low',
+        'B (Incoming)': 'base=C4, horizon=[C2, C1], priority=high',
+        'C (Incoming)': 'base=C5, horizon=[C2, C1], priority=medium',
+    }, "C2 is a bottleneck. Only W2 is available. Robot A takes W2. Robot B takes C2. Robot C has nowhere to yield -> DEADLOCK/STANDBY expected.")
+
+    env = TestTrafficEnvironment(['A', 'B', 'C'])
+
+    # State Mocking
+    sA = mock_state_rec('A', base='C1')
+    sB = mock_state_rec('B', base='C4')
+    sC = mock_state_rec('C', base='C5')
+
+    # Orders Mocking - all converge on C2
+    oA = mock_order_rec('A', 'O_A', checkpoints=['C2', 'C3'], target_base_idx=0, landmark=[0.0, 'low', 'transport', 'C1', 'C3'])
+    oB = mock_order_rec('B', 'O_B', checkpoints=['C2', 'C1'], target_base_idx=0, landmark=[0.0, 'high', 'transport', 'C4', 'C1'])
+    oC = mock_order_rec('C', 'O_C', checkpoints=['C2', 'C1'], target_base_idx=0, landmark=[0.0, 'medium', 'transport', 'C5', 'C1'])
+
+    env.set_db([sA, sB, sC], [oA, oB, oC])
+
+    print(f"\n{CYAN}[Execute] Testing manage_traffic for Robot A (Low Priority)...{RESET}")
+    env.th.manage_traffic(FLEET, 'A', MFR, VER)
+
+    print(f"\n{CYAN}[Execute] Testing manage_traffic for Robot B (High Priority)...{RESET}")
+    env.th.manage_traffic(FLEET, 'B', MFR, VER)
+
+    print(f"\n{CYAN}[Execute] Testing manage_traffic for Robot C (Medium Priority - Arriving late)...{RESET}")
+    # Force C to attempt yielding, but W2 is already reserved by A.
+    env.th.manage_traffic(FLEET, 'C', MFR, VER)
+
+    # Traffic control is now kept in the DB via Context, not last_traffic_dict directly in instance
+    # The actual output state will show DEADLOCK or STANDBY based on the print logs.
+    print(f"      {CYAN}Check visual logs above for DEADLOCK or missing waitpoint reporting.{RESET}")
+
+
 if __name__ == '__main__':
+    test_s8_waitpoint_exhaustion()
     test_s1()
     test_s2a()
     test_s2b()
